@@ -31,6 +31,18 @@ jobs:
           else
             ./mvnw verify
           fi
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+      - name: Terraform format
+        working-directory: infra
+        run: terraform fmt -check -recursive
+      - name: Terraform init without AWS backend
+        working-directory: infra
+        run: terraform init -backend=false -input=false
+      - name: Terraform validate
+        working-directory: infra
+        run: terraform validate -no-color
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
