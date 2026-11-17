@@ -23,3 +23,14 @@
 hs_err_pid*
 replay_pid*
 target/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!*.tfvars.example
+
+# IDE
+.idea/
