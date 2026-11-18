@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 /** Writes budget decisions to the outbox in the message envelope shared by the services (RFC-002 of the OS). */
 @Component
 class OutboxEventosOrcamento implements EventosOrcamento {
+    static final String GERADO = "OrcamentoGerado";
     static final String APROVADO = "OrcamentoAprovado";
     static final String RECUSADO = "OrcamentoRecusado";
 
@@ -29,20 +30,26 @@ class OutboxEventosOrcamento implements EventosOrcamento {
     }
 
     @Override
+    public void gerado(Orcamento orcamento, UUID sagaId, UUID causationId, String correlationId, Instant ocorridoEm) {
+        registrar(GERADO, orcamento, sagaId, causationId, correlationId, ocorridoEm);
+    }
+
+    @Override
     public void aprovado(Orcamento orcamento, String correlationId, Instant ocorridoEm) {
-        registrar(APROVADO, orcamento, correlationId, ocorridoEm);
+        registrar(APROVADO, orcamento, null, null, correlationId, ocorridoEm);
     }
 
     @Override
     public void recusado(Orcamento orcamento, String correlationId, Instant ocorridoEm) {
-        registrar(RECUSADO, orcamento, correlationId, ocorridoEm);
+        registrar(RECUSADO, orcamento, null, null, correlationId, ocorridoEm);
     }
 
-    private void registrar(String tipo, Orcamento orcamento, String correlationId, Instant ocorridoEm) {
+    private void registrar(String tipo, Orcamento orcamento, UUID sagaId, UUID causationId, String correlationId,
+                           Instant ocorridoEm) {
         UUID messageId = UUID.randomUUID();
-        // sagaId and causationId stay null until the GerarOrcamento command, which carries them,
-        // is consumed and stored with the budget; the OS can still find the Saga by osId.
-        var envelope = new Envelope(messageId, tipo, 1, null, orcamento.osId(), correlationId, null, ocorridoEm,
+        // Decisions made through the API have no saga or causation yet: the command that carried them is
+        // not stored with the budget. The OS finds the Saga by osId.
+        var envelope = new Envelope(messageId, tipo, 1, sagaId, orcamento.osId(), correlationId, causationId, ocorridoEm,
                 new Decisao(orcamento.osId(), orcamento.id()));
         try {
             outbox.registrar(messageId, tipo, mapper.writeValueAsString(envelope), ocorridoEm);
