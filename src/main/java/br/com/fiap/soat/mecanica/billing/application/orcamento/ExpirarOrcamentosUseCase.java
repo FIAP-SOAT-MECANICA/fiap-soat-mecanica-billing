@@ -34,7 +34,7 @@ public class ExpirarOrcamentosUseCase {
         var vencidos = orcamentos.buscarGeradosVencidos(agora, limite);
         for (var registro : vencidos) {
             var expirado = orcamentos.atualizar(registro.orcamento().expirar(agora), registro.versao()).orcamento();
-            eventos.recusado(expirado, null, agora);
+            eventos.recusado(expirado, MotivoRecusa.EXPIRADO, null, agora);
         }
         return vencidos.size();
     }

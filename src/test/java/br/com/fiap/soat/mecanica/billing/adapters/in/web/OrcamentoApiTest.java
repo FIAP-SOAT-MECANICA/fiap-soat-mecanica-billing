@@ -182,6 +182,8 @@ class OrcamentoApiTest {
         List<JsonNode> eventos = eventos(orcamento.id());
         assertEquals(1, eventos.size());
         assertEquals("OrcamentoRecusado", eventos.get(0).get("type").asText());
+        assertEquals("RECUSADO_PELO_CLIENTE", eventos.get(0).get("payload").get("motivo").asText());
+        assertEquals(orcamento.id().toString(), eventos.get(0).get("payload").get("orcamentoId").asText());
         assertTrue(eventos.get(0).get("correlationId").isNull());
     }
 

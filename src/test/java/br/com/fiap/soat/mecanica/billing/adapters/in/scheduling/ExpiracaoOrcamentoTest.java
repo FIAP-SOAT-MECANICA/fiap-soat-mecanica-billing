@@ -83,6 +83,7 @@ class ExpiracaoOrcamentoTest {
         assertEquals(1, evento.path("version").asInt());
         assertEquals(vencido.osId().toString(), evento.path("payload").path("osId").asText());
         assertEquals(vencido.id().toString(), evento.path("payload").path("orcamentoId").asText());
+        assertEquals("EXPIRADO", evento.path("payload").path("motivo").asText());
 
         // Runs again and again without announcing twice; budgets not overdue, or already decided, are untouched.
         Thread.sleep(1500);

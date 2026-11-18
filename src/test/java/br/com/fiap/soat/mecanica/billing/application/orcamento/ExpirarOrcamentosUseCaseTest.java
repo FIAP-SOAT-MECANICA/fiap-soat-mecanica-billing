@@ -43,8 +43,8 @@ class ExpirarOrcamentosUseCaseTest {
         verify(orcamentos).atualizar(any(), eq(5L));
         assertEquals(EstadoOrcamento.EXPIRADO, gravados.getValue().estado());
         assertEquals(a.orcamento().id(), gravados.getValue().id());
-        verify(eventos).recusado(gravados.getValue(), null, AGORA);
-        verify(eventos, times(2)).recusado(any(), eq(null), eq(AGORA));
+        verify(eventos).recusado(gravados.getValue(), MotivoRecusa.EXPIRADO, null, AGORA);
+        verify(eventos, times(2)).recusado(any(), eq(MotivoRecusa.EXPIRADO), eq(null), eq(AGORA));
     }
 
     @Test void semVencidosNaoFazNada() {
