@@ -40,6 +40,17 @@ class PagamentoTest {
         assertEquals(EstadoPagamento.APROVADO, retry.confirmar(NOW.plusSeconds(8)).estado());
     }
 
+    @Test void cobrancaPendenteSePodeCancelarMasDecididaNao() {
+        var pendente = Pagamento.criar(UUID.randomUUID(), aprovado(), "mp-c", NOW);
+        var cancelado = pendente.cancelar(NOW.plusSeconds(5));
+        assertEquals(EstadoPagamento.CANCELADO, cancelado.estado());
+        assertEquals(NOW.plusSeconds(5), cancelado.decididoEm());
+        assertSame(cancelado, cancelado.cancelar(NOW.plusSeconds(9)));
+        assertThrows(IllegalStateException.class, () -> cancelado.confirmar(NOW.plusSeconds(9)));
+        assertThrows(IllegalStateException.class, () -> pendente.confirmar(NOW).cancelar(NOW.plusSeconds(1)));
+        assertThrows(IllegalStateException.class, () -> pendente.recusar(NOW).cancelar(NOW.plusSeconds(1)));
+    }
+
     @Test void rejeitaValorReferenciaEInstantesInvalidos() {
         UUID id = UUID.randomUUID();
         UUID budgetId = UUID.randomUUID();

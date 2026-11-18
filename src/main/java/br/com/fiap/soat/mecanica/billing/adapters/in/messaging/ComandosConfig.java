@@ -4,6 +4,9 @@ import br.com.fiap.soat.mecanica.billing.adapters.AwsClientes;
 import br.com.fiap.soat.mecanica.billing.application.orcamento.CancelarOrcamentoUseCase;
 import br.com.fiap.soat.mecanica.billing.application.orcamento.GerarOrcamentoUseCase;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import br.com.fiap.soat.mecanica.billing.application.pagamento.CancelarCobrancaUseCase;
+import br.com.fiap.soat.mecanica.billing.application.pagamento.SolicitarPagamentoUseCase;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Bean;
@@ -28,8 +31,10 @@ class ComandosConfig {
 
     @Bean
     TratadorComandos tratadorComandos(ObjectMapper mapper, GerarOrcamentoUseCase gerar,
-                                      CancelarOrcamentoUseCase cancelar) {
-        return new TratadorComandos(mapper, gerar, cancelar);
+                                      CancelarOrcamentoUseCase cancelar,
+                                      ObjectProvider<SolicitarPagamentoUseCase> solicitarPagamento,
+                                      CancelarCobrancaUseCase cancelarCobranca) {
+        return new TratadorComandos(mapper, gerar, cancelar, solicitarPagamento.getIfAvailable(), cancelarCobranca);
     }
 
     @Bean

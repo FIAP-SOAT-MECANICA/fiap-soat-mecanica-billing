@@ -66,6 +66,16 @@ class JdbcPagamentoRepositoryTest extends PersistenciaTestBase {
         assertEquals(EstadoPagamento.RECUSADO, tentativas.get(1).pagamento().estado());
     }
 
+    @Test void cobrancaCanceladaEhGravadaComOMomentoDaDecisao() {
+        var orcamento = aprovado();
+        var pendente = pagamentos.inserir(
+                Pagamento.criar(UUID.randomUUID(), orcamento, referencia(), CRIADO.plusSeconds(60)), "https://pagar");
+        var cancelado = pagamentos.atualizar(pendente.pagamento().cancelar(CRIADO.plusSeconds(90)), pendente.versao());
+        assertEquals(EstadoPagamento.CANCELADO, cancelado.pagamento().estado());
+        assertEquals(CRIADO.plusSeconds(90), cancelado.pagamento().decididoEm());
+        assertEquals("https://pagar", cancelado.linkPagamento());
+    }
+
     @Test void rejeitaReferenciaRepetidaEOrcamentoInexistente() {
         var orcamento = aprovado();
         String referencia = referencia();

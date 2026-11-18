@@ -1,6 +1,7 @@
 package br.com.fiap.soat.mecanica.billing.domain;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 import java.util.UUID;
 
 /** Boundary with the payment provider (Mercado Pago). */
@@ -19,6 +20,16 @@ public interface CobrancaGateway {
      * @throws FalhaCobrancaException if the provider is unreachable or refuses the request
      */
     EstadoPagamento consultar(String referenciaExterna);
+
+    /**
+     * What the provider says about one payment, as reported by a notification.
+     * @return empty when the provider does not know the payment id
+     * @throws FalhaCobrancaException if the provider is unreachable or refuses the request
+     */
+    Optional<PagamentoProvedor> consultarPagamento(String paymentId);
+
+    /** @param referenciaExterna the reference sent in {@link #criar}; null when the payment is not ours */
+    record PagamentoProvedor(String referenciaExterna, EstadoPagamento estado) { }
 
     record Cobranca(String referenciaExterna, String linkPagamento) { }
 }

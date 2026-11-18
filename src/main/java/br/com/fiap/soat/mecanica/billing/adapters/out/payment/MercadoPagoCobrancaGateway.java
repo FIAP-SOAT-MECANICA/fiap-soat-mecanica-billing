@@ -7,9 +7,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -66,6 +68,30 @@ public class MercadoPagoCobrancaGateway implements CobrancaGateway {
             if (!status.equals("rejected") && !status.equals("cancelled")) todosFalharam = false;
         }
         return todosFalharam ? EstadoPagamento.RECUSADO : EstadoPagamento.PENDENTE;
+    }
+
+    @Override
+    public Optional<PagamentoProvedor> consultarPagamento(String paymentId) {
+        JsonNode pagamento;
+        try {
+            pagamento = chamar(() -> http.get().uri("/v1/payments/{id}", paymentId).retrieve().body(JsonNode.class),
+                    "consultar pagamento");
+        } catch (FalhaCobrancaException e) {
+            if (e.getCause() instanceof HttpClientErrorException.NotFound) return Optional.empty();
+            throw e;
+        }
+        if (pagamento == null || pagamento.isMissingNode()) return Optional.empty();
+        return Optional.of(new PagamentoProvedor(pagamento.path("external_reference").asText(null),
+                estadoDe(pagamento.path("status").asText())));
+    }
+
+    /** approved settles it; rejected and cancelled refuse it; everything else (pending, in_process, refunds) waits. */
+    private static EstadoPagamento estadoDe(String status) {
+        return switch (status) {
+            case "approved" -> EstadoPagamento.APROVADO;
+            case "rejected", "cancelled" -> EstadoPagamento.RECUSADO;
+            default -> EstadoPagamento.PENDENTE;
+        };
     }
 
     private static <T> T chamar(java.util.function.Supplier<T> chamada, String acao) {

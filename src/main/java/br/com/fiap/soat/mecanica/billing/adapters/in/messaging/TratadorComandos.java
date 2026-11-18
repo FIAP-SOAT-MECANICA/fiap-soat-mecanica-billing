@@ -2,6 +2,8 @@ package br.com.fiap.soat.mecanica.billing.adapters.in.messaging;
 
 import br.com.fiap.soat.mecanica.billing.application.orcamento.CancelarOrcamentoUseCase;
 import br.com.fiap.soat.mecanica.billing.application.orcamento.GerarOrcamentoUseCase;
+import br.com.fiap.soat.mecanica.billing.application.pagamento.CancelarCobrancaUseCase;
+import br.com.fiap.soat.mecanica.billing.application.pagamento.SolicitarPagamentoUseCase;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,6 +18,8 @@ import org.slf4j.LoggerFactory;
 public class TratadorComandos {
     static final String GERAR_ORCAMENTO = "GerarOrcamento";
     static final String CANCELAR_ORCAMENTO = "CancelarOrcamento";
+    static final String SOLICITAR_PAGAMENTO = "SolicitarPagamento";
+    static final String CANCELAR_COBRANCA = "CancelarCobranca";
     static final int VERSAO_SUPORTADA = 1;
 
     private static final Logger log = LoggerFactory.getLogger(TratadorComandos.class);
@@ -34,11 +38,17 @@ public class TratadorComandos {
     private final ObjectMapper mapper;
     private final GerarOrcamentoUseCase gerar;
     private final CancelarOrcamentoUseCase cancelar;
+    private final SolicitarPagamentoUseCase solicitarPagamento;
+    private final CancelarCobrancaUseCase cancelarCobranca;
 
-    public TratadorComandos(ObjectMapper mapper, GerarOrcamentoUseCase gerar, CancelarOrcamentoUseCase cancelar) {
+    /** @param solicitarPagamento null while the payment provider is not configured: the command then stays queued */
+    public TratadorComandos(ObjectMapper mapper, GerarOrcamentoUseCase gerar, CancelarOrcamentoUseCase cancelar,
+                            SolicitarPagamentoUseCase solicitarPagamento, CancelarCobrancaUseCase cancelarCobranca) {
         this.mapper = mapper;
         this.gerar = gerar;
         this.cancelar = cancelar;
+        this.solicitarPagamento = solicitarPagamento;
+        this.cancelarCobranca = cancelarCobranca;
     }
 
     /**
@@ -57,6 +67,21 @@ public class TratadorComandos {
             case CANCELAR_ORCAMENTO -> {
                 var p = payload(envelope, ReferenciaPayload.class);
                 cancelar.executar(new CancelarOrcamentoUseCase.Comando(envelope.messageId(), envelope.osId(),
+                        p.orcamentoId()));
+            }
+            case SOLICITAR_PAGAMENTO -> {
+                if (solicitarPagamento == null) {
+                    log.warn("SolicitarPagamento sem tratador (provedor de pagamento nao configurado); mensagem mantida"
+                            + " na fila. messageId={}", envelope.messageId());
+                    return false;
+                }
+                var p = payload(envelope, ReferenciaPayload.class);
+                solicitarPagamento.executar(new SolicitarPagamentoUseCase.Comando(envelope.messageId(),
+                        envelope.osId(), p.orcamentoId()));
+            }
+            case CANCELAR_COBRANCA -> {
+                var p = payload(envelope, ReferenciaPayload.class);
+                cancelarCobranca.executar(new CancelarCobrancaUseCase.Comando(envelope.messageId(), envelope.osId(),
                         p.orcamentoId()));
             }
             default -> {

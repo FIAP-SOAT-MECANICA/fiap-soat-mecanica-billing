@@ -35,6 +35,9 @@ public record Pagamento(UUID id, UUID orcamentoId, UUID osId, BigDecimal valor,
     public Pagamento confirmar(Instant agora) { return decidir(EstadoPagamento.APROVADO, agora); }
     public Pagamento recusar(Instant agora) { return decidir(EstadoPagamento.RECUSADO, agora); }
 
+    /** Withdraws a charge nobody decided yet; cancelling twice is a no-op. */
+    public Pagamento cancelar(Instant agora) { return decidir(EstadoPagamento.CANCELADO, agora); }
+
     private Pagamento decidir(EstadoPagamento novo, Instant agora) {
         Objects.requireNonNull(agora, "agora");
         if (estado == novo) return this; // Repeated webhook notification.

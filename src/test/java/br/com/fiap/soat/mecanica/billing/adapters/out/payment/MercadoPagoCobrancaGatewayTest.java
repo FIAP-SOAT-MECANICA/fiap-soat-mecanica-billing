@@ -140,4 +140,56 @@ class MercadoPagoCobrancaGatewayTest {
                 .andRespond(withStatus(org.springframework.http.HttpStatus.BAD_GATEWAY));
         assertThrows(FalhaCobrancaException.class, () -> gateway.consultar(referencia));
     }
+
+    void pagamentoRetorna(String json) {
+        servidor.expect(requestTo(BASE + "/v1/payments/9001"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer TOKEN-SECRETO"))
+                .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
+    }
+
+    @Test void pagamentoAprovadoTrazAReferenciaNossa() {
+        var gateway = gateway("");
+        pagamentoRetorna("{\"id\":9001,\"status\":\"approved\",\"external_reference\":\"" + referencia + "\"}");
+        var p = gateway.consultarPagamento("9001").orElseThrow();
+        assertEquals(referencia, p.referenciaExterna());
+        assertEquals(EstadoPagamento.APROVADO, p.estado());
+    }
+
+    @Test void statusDoPagamentoViraEstadoNosso() {
+        var gateway = gateway("");
+        for (String[] caso : new String[][] {{"rejected", "RECUSADO"}, {"cancelled", "RECUSADO"}, {"pending", "PENDENTE"},
+                {"in_process", "PENDENTE"}, {"authorized", "PENDENTE"}, {"refunded", "PENDENTE"}}) {
+            servidor.reset();
+            pagamentoRetorna("{\"status\":\"" + caso[0] + "\",\"external_reference\":\"x\"}");
+            assertEquals(EstadoPagamento.valueOf(caso[1]), gateway.consultarPagamento("9001").orElseThrow().estado(), caso[0]);
+        }
+    }
+
+    @Test void pagamentoSemReferenciaNossaVemComReferenciaNula() {
+        var gateway = gateway("");
+        pagamentoRetorna("{\"status\":\"approved\"}");
+        assertNull(gateway.consultarPagamento("9001").orElseThrow().referenciaExterna());
+    }
+
+    @Test void pagamentoDesconhecidoDoProvedorEhVazio() {
+        var gateway = gateway("");
+        servidor.expect(requestTo(BASE + "/v1/payments/9001")).andRespond(withResourceNotFound());
+        assertTrue(gateway.consultarPagamento("9001").isEmpty());
+    }
+
+    @Test void pagamentoComRespostaVaziaEhVazio() {
+        var gateway = gateway("");
+        servidor.expect(requestTo(BASE + "/v1/payments/9001")).andRespond(withSuccess());
+        assertTrue(gateway.consultarPagamento("9001").isEmpty());
+    }
+
+    @Test void erroDoProvedorAoConsultarPagamentoEhFalha() {
+        var gateway = gateway("");
+        servidor.expect(requestTo(BASE + "/v1/payments/9001")).andRespond(withServerError());
+        assertThrows(FalhaCobrancaException.class, () -> gateway.consultarPagamento("9001"));
+        servidor.reset();
+        servidor.expect(requestTo(BASE + "/v1/payments/9001")).andRespond(withUnauthorizedRequest());
+        assertThrows(FalhaCobrancaException.class, () -> gateway.consultarPagamento("9001"));
+    }
 }
