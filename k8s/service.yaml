@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mecanica-billing
+  namespace: mecanica
+spec:
+  type: ClusterIP
+  selector:
+    app: mecanica-billing
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

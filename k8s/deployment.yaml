@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mecanica-billing
+  namespace: mecanica
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: mecanica-billing
+  template:
+    metadata:
+      labels:
+        app: mecanica-billing
+        app.kubernetes.io/part-of: fiap-soat-mecanica
+        tags.datadoghq.com/service: mecanica-billing
+        tags.datadoghq.com/env: prd
+      annotations:
+        instrumentation.opentelemetry.io/inject-java: mecanica/java-instrumentation
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: billing
+          image: ${IMAGE_URI}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          # Banco, filas, chave do Identity e credenciais do Mercado Pago chegam pelo ConfigMap e pelo Secret
+          # criados no CD. Sem chaves da AWS: o SDK usa o papel do no (LabRole) pela cadeia padrao.
+          envFrom:
+            - configMapRef:
+                name: mecanica-billing-config
+            - secretRef:
+                name: mecanica-billing-secret
+          env:
+            - name: SERVER_SHUTDOWN
+              value: graceful
+            # O agente OTel injetado propaga o traceparent pelas mensagens SQS e SNS.
+            - name: OTEL_INSTRUMENTATION_AWS_SDK_EXPERIMENTAL_USE_PROPAGATOR_FOR_MESSAGING
+              value: "true"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 384Mi
+            limits:
+              cpu: 500m
+              memory: 768Mi
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 3

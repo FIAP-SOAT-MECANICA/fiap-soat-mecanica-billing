@@ -46,3 +46,36 @@ Pontos ainda abertos:
 - `CancelarCobranca` marca a cobrança como cancelada aqui, mas não fecha a página de pagamento no Mercado Pago.
 - A API só aceita tokens do Identity (RS256), que ainda não existe; até lá toda rota autenticada responde 401.
 - Nada foi exercitado contra a AWS real nem contra o sandbox do Mercado Pago.
+
+## Entrega na AWS (EKS)
+
+A entrega segue o padrão do Execução: Terraform para a infraestrutura, imagem imutável no ECR e rollout no cluster compartilhado. Nada disso foi executado na AWS ainda; o CD só valida sintaxe localmente.
+
+**Ordem.** `-k8s` (cluster, namespace `mecanica`, Traefik e o recurso `Instrumentation` do OTel) → Billing → OS (o módulo de mensageria do OS lê do SSM a fila e o tópico do Billing, por isso o Billing aplica primeiro). O `apply` do Billing não depende do OS.
+
+**Infraestrutura (`infra/`, state `billing/terraform.tfstate`).**
+
+| Recurso | Nome | Observação |
+| --- | --- | --- |
+| Tópico SNS | `mecanica-billing-eventos` | eventos do Billing; o OS o assina |
+| Fila SQS e DLQ | `mecanica-billing-comandos` e `-dlq` | comandos do OS; 5 tentativas antes da DLQ |
+| SSM | `/mecanica/billing/command-queue-url` e `/mecanica/billing/event-topic-arn` | descoberta pelo OS |
+| ECR | `mecanica-billing` | tags imutáveis, scan no push, guarda as 30 imagens mais novas |
+| RDS PostgreSQL | `mecanica-billing-db-prod` | banco `mecanica_billing`, privado, criptografado, sem snapshot final (laboratório) |
+| Secrets Manager | `mecanica-billing-db-credentials` | usuário, senha gerada, host, porta e banco |
+
+O RDS só é criado quando `vpc_id` é informado (variável de repositório `RDS_VPC_ID`, mais `RDS_SUBNET_IDS` como lista JSON, por exemplo `["subnet-a","subnet-b"]`, e `RDS_ALLOWED_SG_ID`, o security group dos nós do EKS). Sem elas, o CD aplica a mensageria e o ECR, publica a imagem e para antes do rollout, com a mensagem do que falta.
+
+**Deploy (`.github/workflows/cd.yml`).** Manual (`workflow_dispatch`, confirmando `deploy`), no ambiente protegido `production`. Roda `verify`, aplica o Terraform, constrói e envia a imagem com o SHA como tag, cria o Secret e o ConfigMap do serviço e aplica `k8s/` (deployment, service, HPA e ingress), esperando o rollout. As credenciais AWS vêm dos secrets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e `AWS_SESSION_TOKEN`, que o laboratório renova a cada sessão. O pod não leva chaves da AWS: o SDK usa o papel do nó. Mais de uma réplica é seguro, porque a outbox, a expiração e o consumidor travam as linhas ou deduplicam pela inbox.
+
+| Onde | Nome | Para quê |
+| --- | --- | --- |
+| Secret | `MERCADOPAGO_ACCESS_TOKEN`, `MERCADOPAGO_WEBHOOK_SECRET` | cobrança e assinatura do webhook; ausentes, o CD avisa e o serviço sobe sem pagamento |
+| Variável | `PUBLIC_BASE_URL` | URL pública do API Gateway; vira `MERCADOPAGO_NOTIFICATION_URL` (`.../webhooks/mercadopago`) |
+| Variável | `IDENTITY_JWT_PUBLIC_KEY_SECRET_NAME` | segredo do Secrets Manager com a chave pública do Identity; ausente, o serviço sobe e responde 401 em toda rota autenticada. O nome real vem do Terraform do Identity e ainda precisa ser confirmado |
+| Variável | `EKS_CLUSTER_NAME`, `NAMESPACE`, `PROJECT_NAME` | opcionais; padrão `mecanica` |
+
+**Rotas e API Gateway.** O ingress (`k8s/ingress.yaml`) publica `/orcamentos`, `/pagamentos` e `/webhooks/mercadopago` no Traefik. Como o NLB pode ser chamado sem passar pelo authorizer, o Billing valida o JWT sozinho nas rotas autenticadas, e o webhook valida a assinatura do Mercado Pago. O Mercado Pago não envia JWT, então `POST /webhooks/mercadopago` precisa ser uma rota pública no API Gateway, **sem authorizer**, repassando sem alteração a query string (`data.id`) e os cabeçalhos `x-signature` e `x-request-id`. Essa configuração vive no repositório do API Gateway e do authorizer (`-auth`), que ainda é a Lambda da Fase 3 e não tem essa rota; quem o mantém precisa criá-la antes de cadastrar a URL no painel do Mercado Pago.
+
+**Observabilidade.** O pod recebe o agente OpenTelemetry pela anotação `instrumentation.opentelemetry.io/inject-java`, e a variável `OTEL_INSTRUMENTATION_AWS_SDK_EXPERIMENTAL_USE_PROPAGATOR_FOR_MESSAGING` faz o `traceparent` atravessar SQS e SNS, ligando o trace do Billing ao da Saga. Os rótulos `tags.datadoghq.com/*` identificam o serviço no Datadog.
+
