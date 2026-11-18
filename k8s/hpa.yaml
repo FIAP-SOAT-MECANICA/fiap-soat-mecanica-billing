@@ -1,0 +1,21 @@
+# Mais de uma replica e seguro: a outbox, a expiracao e o consumidor de comandos travam as linhas com
+# FOR UPDATE SKIP LOCKED ou deduplicam pela inbox, entao duas instancias nunca tratam o mesmo item.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: mecanica-billing
+  namespace: mecanica
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mecanica-billing
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

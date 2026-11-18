@@ -1,0 +1,175 @@
+name: Deploy Billing
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type deploy to provision AWS and roll out the service
+        required: true
+        type: choice
+        options: [cancel, deploy]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: billing-production-state
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: inputs.confirm == 'deploy'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AWS_REGION: us-east-1
+      EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME || 'mecanica' }}
+      NAMESPACE: ${{ vars.NAMESPACE || 'mecanica' }}
+      TF_VAR_project: ${{ vars.PROJECT_NAME || 'mecanica' }}
+      # Rede do RDS, vinda do repositorio -k8s. Sem VPC o banco nao e criado e o rollout para antes dele.
+      TF_VAR_vpc_id: ${{ vars.RDS_VPC_ID }}
+      TF_VAR_subnet_ids: ${{ vars.RDS_SUBNET_IDS || '[]' }}
+      TF_VAR_allowed_security_group_id: ${{ vars.RDS_ALLOWED_SG_ID }}
+      TF_IN_AUTOMATION: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Verify tests and 80% instruction coverage
+        run: ./mvnw -B clean verify
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Check AWS session and locate state bucket
+        id: account
+        run: |
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          echo "bucket=mecanica-tfstate-${account_id}" >> "$GITHUB_OUTPUT"
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - name: Terraform init
+        working-directory: infra
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ steps.account.outputs.bucket }}" \
+            -backend-config="key=billing/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="use_lockfile=true"
+      - name: Terraform plan and apply
+        working-directory: infra
+        run: |
+          terraform fmt -check -recursive
+          terraform validate -no-color
+          terraform plan -input=false -out=tfplan
+          terraform apply -input=false tfplan
+      - name: Export resource locations
+        working-directory: infra
+        run: |
+          echo "ECR_URL=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_ENV"
+          echo "BILLING_COMMAND_QUEUE_URL=$(terraform output -raw command_queue_url)" >> "$GITHUB_ENV"
+          echo "BILLING_EVENT_TOPIC_ARN=$(terraform output -raw event_topic_arn)" >> "$GITHUB_ENV"
+          echo "DB_SECRET_NAME=$(terraform output -raw db_secret_name)" >> "$GITHUB_ENV"
+      - name: Build and push immutable image
+        run: |
+          image_uri="${ECR_URL}:${GITHUB_SHA}"
+          repository="${ECR_URL#*/}"
+          if aws ecr describe-images --repository-name "$repository" --image-ids imageTag="$GITHUB_SHA" >/dev/null 2>&1; then
+            echo "Image already exists for this commit"
+          else
+            aws ecr get-login-password --region "$AWS_REGION" |
+              docker login --username AWS --password-stdin "${ECR_URL%%/*}"
+            docker build -t "$image_uri" .
+            docker push "$image_uri"
+          fi
+          echo "IMAGE_URI=$image_uri" >> "$GITHUB_ENV"
+      - uses: azure/setup-kubectl@v4
+      - name: Verify shared cluster prerequisites
+        run: |
+          aws eks update-kubeconfig --name "$EKS_CLUSTER_NAME" --region "$AWS_REGION"
+          kubectl get namespace "$NAMESPACE"
+          kubectl -n "$NAMESPACE" get instrumentation java-instrumentation
+      - name: Require the database
+        run: |
+          if [[ -z "$DB_SECRET_NAME" ]]; then
+            echo "O RDS do Billing nao foi criado: defina as variaveis RDS_VPC_ID, RDS_SUBNET_IDS e RDS_ALLOWED_SG_ID."
+            exit 1
+          fi
+      - name: Read database credentials from Secrets Manager
+        id: db
+        run: |
+          secret_json="$(aws secretsmanager get-secret-value --secret-id "$DB_SECRET_NAME" --query SecretString --output text)"
+          db_user="$(jq -r .username <<< "$secret_json")"
+          db_pass="$(jq -r .password <<< "$secret_json")"
+          echo "::add-mask::$db_user"
+          echo "::add-mask::$db_pass"
+          {
+            echo "url=jdbc:postgresql://$(jq -r .host <<< "$secret_json"):$(jq -r .port <<< "$secret_json")/$(jq -r .dbname <<< "$secret_json")"
+            echo "user=$db_user"
+            echo "pass=$db_pass"
+          } >> "$GITHUB_OUTPUT"
+      - name: Read the Identity public key from Secrets Manager (best-effort)
+        id: identity
+        env:
+          IDENTITY_KEY_SECRET_NAME: ${{ vars.IDENTITY_JWT_PUBLIC_KEY_SECRET_NAME }}
+        run: |
+          # Sem a chave o servico sobe e recusa todo token (401) ate o Identity existir.
+          key=""
+          if [[ -n "$IDENTITY_KEY_SECRET_NAME" ]]; then
+            key="$(aws secretsmanager get-secret-value --secret-id "$IDENTITY_KEY_SECRET_NAME" --query SecretString --output text 2>/dev/null || true)"
+          fi
+          if [[ -z "$key" ]]; then
+            echo "::warning::Chave publica do Identity ausente (variavel IDENTITY_JWT_PUBLIC_KEY_SECRET_NAME): toda rota autenticada respondera 401."
+          fi
+          {
+            echo "key<<EOF_KEY"
+            echo "$key"
+            echo "EOF_KEY"
+          } >> "$GITHUB_OUTPUT"
+      - name: Apply Secret and ConfigMap
+        env:
+          DB_URL: ${{ steps.db.outputs.url }}
+          DB_USER: ${{ steps.db.outputs.user }}
+          DB_PASS: ${{ steps.db.outputs.pass }}
+          JWT_PUBLIC_KEY: ${{ steps.identity.outputs.key }}
+          MERCADOPAGO_ACCESS_TOKEN: ${{ secrets.MERCADOPAGO_ACCESS_TOKEN }}
+          MERCADOPAGO_WEBHOOK_SECRET: ${{ secrets.MERCADOPAGO_WEBHOOK_SECRET }}
+          PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+        run: |
+          if [[ -z "$MERCADOPAGO_ACCESS_TOKEN" || -z "$MERCADOPAGO_WEBHOOK_SECRET" ]]; then
+            echo "::warning::Credenciais do Mercado Pago ausentes: SolicitarPagamento fica na fila e o webhook recusa tudo."
+          fi
+          notification_url=""
+          if [[ -n "$PUBLIC_BASE_URL" ]]; then notification_url="${PUBLIC_BASE_URL%/}/webhooks/mercadopago"; fi
+          kubectl create secret generic mecanica-billing-secret \
+            --namespace "$NAMESPACE" \
+            --from-literal=BILLING_DB_USER="$DB_USER" \
+            --from-literal=BILLING_DB_PASSWORD="$DB_PASS" \
+            --from-literal=BILLING_JWT_PUBLIC_KEY="$JWT_PUBLIC_KEY" \
+            --from-literal=MERCADOPAGO_ACCESS_TOKEN="$MERCADOPAGO_ACCESS_TOKEN" \
+            --from-literal=MERCADOPAGO_WEBHOOK_SECRET="$MERCADOPAGO_WEBHOOK_SECRET" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create configmap mecanica-billing-config \
+            --namespace "$NAMESPACE" \
+            --from-literal=BILLING_DB_URL="$DB_URL" \
+            --from-literal=AWS_REGION="$AWS_REGION" \
+            --from-literal=BILLING_COMMAND_QUEUE_URL="$BILLING_COMMAND_QUEUE_URL" \
+            --from-literal=BILLING_EVENT_TOPIC_ARN="$BILLING_EVENT_TOPIC_ARN" \
+            --from-literal=MERCADOPAGO_NOTIFICATION_URL="$notification_url" \
+            --dry-run=client -o yaml | kubectl apply -f -
+      - name: Roll out service
+        run: |
+          command -v envsubst
+          envsubst < k8s/deployment.yaml | kubectl apply -f -
+          kubectl apply -f k8s/service.yaml
+          kubectl apply -f k8s/hpa.yaml
+          kubectl apply -f k8s/ingress.yaml
+          kubectl -n "$NAMESPACE" rollout status deployment/mecanica-billing --timeout=300s
+          kubectl -n "$NAMESPACE" get deployment,service,hpa,ingress mecanica-billing
