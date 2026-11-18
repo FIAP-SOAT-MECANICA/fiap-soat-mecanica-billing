@@ -14,25 +14,25 @@ import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
 
 /** SNS topic with one raw-delivery SQS subscriber, the way the OS service subscribes to Billing. */
-final class LocalStackSupport {
-    static final LocalStackContainer localstack = new LocalStackContainer(
+public final class LocalStackSupport {
+    public static final LocalStackContainer localstack = new LocalStackContainer(
             DockerImageName.parse("localstack/localstack:4.9.2"))
             .withServices(LocalStackContainer.Service.SNS, LocalStackContainer.Service.SQS);
 
     static { localstack.start(); }
 
-    static final StaticCredentialsProvider CREDENCIAIS =
+    public static final StaticCredentialsProvider CREDENCIAIS =
             StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test"));
-    static final SnsClient sns = SnsClient.builder().endpointOverride(localstack.getEndpoint())
+    public static final SnsClient sns = SnsClient.builder().endpointOverride(localstack.getEndpoint())
             .region(Region.of(localstack.getRegion())).credentialsProvider(CREDENCIAIS).build();
-    static final SqsClient sqs = SqsClient.builder().endpointOverride(localstack.getEndpoint())
+    public static final SqsClient sqs = SqsClient.builder().endpointOverride(localstack.getEndpoint())
             .region(Region.of(localstack.getRegion())).credentialsProvider(CREDENCIAIS).build();
 
-    record Canal(String topicArn, String queueUrl) { }
+    public record Canal(String topicArn, String queueUrl) { }
 
     private LocalStackSupport() { }
 
-    static Canal novoCanal(String nome) {
+    public static Canal novoCanal(String nome) {
         String topicArn = sns.createTopic(b -> b.name(nome + "-eventos")).topicArn();
         String queueUrl = sqs.createQueue(b -> b.queueName(nome + "-respostas")).queueUrl();
         String queueArn = sqs.getQueueAttributes(b -> b.queueUrl(queueUrl)
@@ -42,7 +42,11 @@ final class LocalStackSupport {
         return new Canal(topicArn, queueUrl);
     }
 
-    static List<Message> receber(String queueUrl, int segundos) {
+    public static String novaFila(String nome) {
+        return sqs.createQueue(b -> b.queueName(nome)).queueUrl();
+    }
+
+    public static List<Message> receber(String queueUrl, int segundos) {
         return sqs.receiveMessage(b -> b.queueUrl(queueUrl).maxNumberOfMessages(10)
                 .waitTimeSeconds(segundos).messageAttributeNames("All")).messages();
     }
