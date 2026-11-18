@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.GrantedAuthority;
@@ -52,7 +53,9 @@ class SecurityConfig {
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers("/actuator/health/**", "/actuator/info",
                                 "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
-                        .requestMatchers("/orcamentos/**").hasAnyRole("CLIENTE", "ATENDENTE")
+                        // Called by the payment provider, not by a user: authenticated by its HMAC signature.
+                        .requestMatchers(HttpMethod.POST, "/webhooks/mercadopago").permitAll()
+                        .requestMatchers("/orcamentos/**", "/pagamentos/**").hasAnyRole("CLIENTE", "ATENDENTE")
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(conversor)))
                 .build();

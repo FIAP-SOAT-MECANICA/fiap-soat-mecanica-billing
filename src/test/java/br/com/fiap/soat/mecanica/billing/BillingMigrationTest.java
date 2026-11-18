@@ -19,7 +19,7 @@ class BillingMigrationTest {
     @Test void criaSchemaEImpedeDuplicidadeDeRevisaoMensagemEWebhook() throws Exception {
         var result = Flyway.configure().dataSource(db.getJdbcUrl(), db.getUsername(), db.getPassword())
                 .load().migrate();
-        assertEquals(2, result.migrationsExecuted);
+        assertEquals(4, result.migrationsExecuted);
         UUID osId = UUID.randomUUID();
         UUID clienteId = UUID.randomUUID();
         try (var connection = DriverManager.getConnection(db.getJdbcUrl(), db.getUsername(), db.getPassword())) {

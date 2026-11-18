@@ -62,6 +62,7 @@ class OrcamentoApiTest {
 
     @Autowired MockMvc mvc;
     @Autowired OrcamentoRepository orcamentos;
+    @Autowired br.com.fiap.soat.mecanica.billing.domain.PagamentoRepository pagamentos;
     @Autowired JdbcClient jdbc;
     @Autowired ObjectMapper mapper;
 
@@ -90,7 +91,7 @@ class OrcamentoApiTest {
         mvc.perform(comToken(get("/orcamentos/" + id), funcionario("MECANICO"))).andExpect(status().isForbidden());
         mvc.perform(comToken(get("/orcamentos/" + id), token(EMISSOR, "x", "OUTRO", null, c -> { })))
                 .andExpect(status().isForbidden());
-        mvc.perform(comToken(get("/pagamentos/por-os/" + id), funcionario("ATENDENTE")))
+        mvc.perform(comToken(get("/pagamentos/por-os/" + id), funcionario("MECANICO")))
                 .andExpect(status().isForbidden());
     }
 
@@ -181,6 +182,8 @@ class OrcamentoApiTest {
         List<JsonNode> eventos = eventos(orcamento.id());
         assertEquals(1, eventos.size());
         assertEquals("OrcamentoRecusado", eventos.get(0).get("type").asText());
+        assertEquals("RECUSADO_PELO_CLIENTE", eventos.get(0).get("payload").get("motivo").asText());
+        assertEquals(orcamento.id().toString(), eventos.get(0).get("payload").get("orcamentoId").asText());
         assertTrue(eventos.get(0).get("correlationId").isNull());
     }
 
@@ -202,6 +205,29 @@ class OrcamentoApiTest {
                 .andExpect(status().isNotFound());
         mvc.perform(comToken(get("/orcamentos/nao-e-uuid"), atendente)).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.mensagem").value("Parâmetro inválido: id"));
+    }
+
+    @Test void clienteVeAsCobrancasDoProprioOrcamentoComOLinkEOutroNao() throws Exception {
+        Orcamento orcamento = gravar(vigente().aprovar(Instant.now()));
+        var cobranca = br.com.fiap.soat.mecanica.billing.domain.Pagamento.criar(UUID.randomUUID(), orcamento,
+                "ref-" + UUID.randomUUID(), Instant.now());
+        pagamentos.inserir(cobranca, "https://pagar/abc");
+
+        mvc.perform(comToken(get("/pagamentos/por-os/" + orcamento.osId()), doCliente(cliente)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(cobranca.id().toString()))
+                .andExpect(jsonPath("$[0].estado").value("PENDENTE"))
+                .andExpect(jsonPath("$[0].valor").value(139.80))
+                .andExpect(jsonPath("$[0].linkPagamento").value("https://pagar/abc"));
+        mvc.perform(comToken(get("/pagamentos/por-os/" + orcamento.osId()), funcionario("ATENDENTE")))
+                .andExpect(status().isOk());
+        mvc.perform(comToken(get("/pagamentos/por-os/" + orcamento.osId()), doCliente(UUID.randomUUID())))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.mensagem").value("Pagamento pertence a outro cliente"));
+        mvc.perform(get("/pagamentos/por-os/" + orcamento.osId())).andExpect(status().isUnauthorized());
+        mvc.perform(comToken(get("/pagamentos/por-os/" + UUID.randomUUID()), doCliente(cliente)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
     }
 
     private Orcamento vigente() {

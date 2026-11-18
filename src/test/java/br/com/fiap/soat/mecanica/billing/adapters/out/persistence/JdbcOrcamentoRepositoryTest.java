@@ -6,6 +6,9 @@ import br.com.fiap.soat.mecanica.billing.domain.ConflitoDeVersaoException;
 import br.com.fiap.soat.mecanica.billing.domain.EstadoOrcamento;
 import br.com.fiap.soat.mecanica.billing.domain.OrcamentoRepository;
 import br.com.fiap.soat.mecanica.billing.domain.RegistroDuplicadoException;
+import br.com.fiap.soat.mecanica.billing.domain.Orcamento;
+import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -72,5 +75,29 @@ class JdbcOrcamentoRepositoryTest extends PersistenciaTestBase {
                 """).param("id", id).param("osId", UUID.randomUUID()).param("clienteId", UUID.randomUUID())
                 .update();
         assertThrows(IllegalStateException.class, () -> orcamentos.buscarPorId(id));
+    }
+
+    @Test void buscaSoOsGeradosVencidosEmOrdemDeVencimentoRespeitandoOLimite() {
+        Instant agora = Instant.parse("2026-06-01T00:00:00Z");
+        var primeiro = orcamentos.inserir(comValidade(agora.minusSeconds(7200), agora.minusSeconds(600)));
+        var segundo = orcamentos.inserir(comValidade(agora.minusSeconds(7200), agora.minusSeconds(60)));
+        var noLimite = orcamentos.inserir(comValidade(agora.minusSeconds(7200), agora));
+        orcamentos.inserir(comValidade(agora.minusSeconds(7200), agora.plusSeconds(1))); // still valid
+        var aprovado = orcamentos.inserir(comValidade(agora.minusSeconds(7200), agora.minusSeconds(30)));
+        orcamentos.atualizar(aprovado.orcamento().aprovar(agora.minusSeconds(100)), aprovado.versao());
+        var cancelado = orcamentos.inserir(comValidade(agora.minusSeconds(7200), agora.minusSeconds(30)));
+        orcamentos.atualizar(cancelado.orcamento().cancelar(), cancelado.versao());
+
+        // Overdue budgets from other tests share the database, so compare against the ones made here.
+        var ids = List.of(primeiro, segundo, noLimite).stream().map(r -> r.orcamento().id()).toList();
+        var todos = orcamentos.buscarGeradosVencidos(agora, 1000).stream().map(r -> r.orcamento().id())
+                .filter(ids::contains).toList();
+        assertEquals(ids, todos);
+        assertEquals(1, orcamentos.buscarGeradosVencidos(agora, 1).size());
+    }
+
+    private static Orcamento comValidade(Instant criado, Instant expira) {
+        var base = orcamento(UUID.randomUUID());
+        return Orcamento.gerar(UUID.randomUUID(), base.osId(), base.clienteId(), base.itens(), criado, expira);
     }
 }

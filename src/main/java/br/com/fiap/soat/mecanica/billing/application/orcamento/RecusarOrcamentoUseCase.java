@@ -26,6 +26,6 @@ public class RecusarOrcamentoUseCase {
     public Registro executar(UUID id, Solicitante solicitante, String correlationId) {
         Instant agora = relogio.instant();
         return decisao.aplicar(id, solicitante, Orcamento::recusar,
-                orcamento -> eventos.recusado(orcamento, correlationId, agora));
+                orcamento -> eventos.recusado(orcamento, MotivoRecusa.RECUSADO_PELO_CLIENTE, correlationId, agora));
     }
 }

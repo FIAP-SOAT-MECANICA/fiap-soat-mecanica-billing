@@ -14,5 +14,5 @@ public interface EventosOrcamento {
 
     void aprovado(Orcamento orcamento, String correlationId, Instant ocorridoEm);
 
-    void recusado(Orcamento orcamento, String correlationId, Instant ocorridoEm);
+    void recusado(Orcamento orcamento, MotivoRecusa motivo, String correlationId, Instant ocorridoEm);
 }

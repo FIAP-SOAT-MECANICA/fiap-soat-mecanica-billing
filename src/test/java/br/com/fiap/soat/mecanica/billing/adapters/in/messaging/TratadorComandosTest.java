@@ -6,6 +6,8 @@ import static org.mockito.Mockito.*;
 
 import br.com.fiap.soat.mecanica.billing.application.orcamento.CancelarOrcamentoUseCase;
 import br.com.fiap.soat.mecanica.billing.application.orcamento.GerarOrcamentoUseCase;
+import br.com.fiap.soat.mecanica.billing.application.pagamento.CancelarCobrancaUseCase;
+import br.com.fiap.soat.mecanica.billing.application.pagamento.SolicitarPagamentoUseCase;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -15,7 +17,10 @@ import org.mockito.ArgumentCaptor;
 class TratadorComandosTest {
     GerarOrcamentoUseCase gerar = mock(GerarOrcamentoUseCase.class);
     CancelarOrcamentoUseCase cancelar = mock(CancelarOrcamentoUseCase.class);
-    TratadorComandos tratador = new TratadorComandos(new ObjectMapper().findAndRegisterModules(), gerar, cancelar);
+    SolicitarPagamentoUseCase solicitar = mock(SolicitarPagamentoUseCase.class);
+    CancelarCobrancaUseCase cancelarCobranca = mock(CancelarCobrancaUseCase.class);
+    ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+    TratadorComandos tratador = new TratadorComandos(mapper, gerar, cancelar, solicitar, cancelarCobranca);
 
     UUID messageId = UUID.randomUUID(), sagaId = UUID.randomUUID(), osId = UUID.randomUUID(),
             clienteId = UUID.randomUUID(), servicoId = UUID.randomUUID(), pecaId = UUID.randomUUID(),
@@ -77,11 +82,29 @@ class TratadorComandosTest {
         verify(cancelar).executar(new CancelarOrcamentoUseCase.Comando(messageId, osId, null));
     }
 
-    @Test void tipoSemTratadorFicaNaFila() {
-        // SolicitarPagamento and CancelarCobranca wait for the Mercado Pago integration.
-        assertFalse(tratador.tratar(envelope("SolicitarPagamento", 1,
+    @Test void tipoDesconhecidoFicaNaFila() {
+        assertFalse(tratador.tratar(envelope("ComandoQueNaoExiste", 1,
                 "{\"osId\":\"%s\",\"orcamentoId\":\"%s\"}".formatted(osId, orcamentoId))));
-        verifyNoInteractions(gerar, cancelar);
+        verifyNoInteractions(gerar, cancelar, solicitar, cancelarCobranca);
+    }
+
+    @Test void solicitarPagamentoEncaminhaAReferencia() {
+        assertTrue(tratador.tratar(envelope("SolicitarPagamento", 1,
+                "{\"osId\":\"%s\",\"orcamentoId\":\"%s\"}".formatted(osId, orcamentoId))));
+        verify(solicitar).executar(new SolicitarPagamentoUseCase.Comando(messageId, osId, orcamentoId));
+    }
+
+    @Test void solicitarPagamentoSemProvedorConfiguradoFicaNaFila() {
+        var semProvedor = new TratadorComandos(mapper, gerar, cancelar, null, cancelarCobranca);
+        assertFalse(semProvedor.tratar(envelope("SolicitarPagamento", 1,
+                "{\"osId\":\"%s\",\"orcamentoId\":\"%s\"}".formatted(osId, orcamentoId))));
+        verifyNoInteractions(solicitar);
+    }
+
+    @Test void cancelarCobrancaEncaminhaAReferencia() {
+        assertTrue(tratador.tratar(envelope("CancelarCobranca", 1,
+                "{\"osId\":\"%s\",\"orcamentoId\":\"%s\"}".formatted(osId, orcamentoId))));
+        verify(cancelarCobranca).executar(new CancelarCobrancaUseCase.Comando(messageId, osId, orcamentoId));
     }
 
     @Test void payloadComOsDiferenteDoEnvelopeEhRejeitado() {

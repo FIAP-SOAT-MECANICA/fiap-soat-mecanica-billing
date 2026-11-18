@@ -24,6 +24,13 @@ public interface OrcamentoRepository {
     List<Registro> listarPorOs(UUID osId);
 
     /**
+     * Budgets still GERADO whose validity ended at or before {@code agora}, oldest expiry first. Inside a
+     * transaction the returned rows stay locked until it ends and rows locked by another instance are skipped,
+     * so two instances never expire the same budget.
+     */
+    List<Registro> buscarGeradosVencidos(java.time.Instant agora, int limite);
+
+    /**
      * Persists a state transition of a budget read at {@code versaoEsperada}.
      * @throws ConflitoDeVersaoException if the stored version differs or the budget is gone
      */

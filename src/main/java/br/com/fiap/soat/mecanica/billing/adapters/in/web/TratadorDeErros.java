@@ -4,6 +4,7 @@ import br.com.fiap.soat.mecanica.billing.application.AcessoNegadoException;
 import br.com.fiap.soat.mecanica.billing.application.orcamento.OrcamentoNaoEncontradoException;
 import br.com.fiap.soat.mecanica.billing.application.orcamento.TransicaoInvalidaException;
 import br.com.fiap.soat.mecanica.billing.domain.ConflitoDeVersaoException;
+import br.com.fiap.soat.mecanica.billing.domain.FalhaCobrancaException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -32,7 +33,13 @@ class TratadorDeErros {
 
     @ExceptionHandler(ConflitoDeVersaoException.class)
     ResponseEntity<Erro> conflito(ConflitoDeVersaoException e) {
-        return responder(HttpStatus.CONFLICT, "Orçamento alterado por outra requisição; consulte e tente de novo");
+        return responder(HttpStatus.CONFLICT, "Registro alterado por outra requisição; consulte e tente de novo");
+    }
+
+    @ExceptionHandler(FalhaCobrancaException.class)
+    ResponseEntity<Erro> provedorIndisponivel(FalhaCobrancaException e) {
+        // Also what makes the payment provider retry a notification.
+        return responder(HttpStatus.BAD_GATEWAY, "Provedor de pagamento indisponível");
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
