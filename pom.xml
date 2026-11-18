@@ -24,6 +24,10 @@
   </dependencies>
   <build><plugins>
     <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId></plugin>
+    <!-- The expiry job is on by default; tests share databases with already-overdue budgets, so it is off unless a test turns it on. -->
+    <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId>
+      <configuration><environmentVariables><BILLING_EXPIRACAO_HABILITADA>false</BILLING_EXPIRACAO_HABILITADA></environmentVariables></configuration>
+    </plugin>
     <plugin><groupId>org.jacoco</groupId><artifactId>jacoco-maven-plugin</artifactId><version>0.8.13</version>
       <executions><execution><goals><goal>prepare-agent</goal></goals></execution>
         <execution><id>report</id><phase>verify</phase><goals><goal>report</goal></goals></execution>

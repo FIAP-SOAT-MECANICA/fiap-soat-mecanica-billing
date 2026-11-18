@@ -77,6 +77,13 @@ class JdbcOrcamentoRepository implements OrcamentoRepository {
     }
 
     @Override
+    public List<Registro> buscarGeradosVencidos(java.time.Instant agora, int limite) {
+        return jdbc.sql("SELECT " + COLUNAS + " FROM orcamentos WHERE estado = 'GERADO' AND expira_em <= :agora "
+                        + "ORDER BY expira_em LIMIT :limite FOR UPDATE SKIP LOCKED")
+                .param("agora", Tempo.paraBanco(agora)).param("limite", limite).query(this::mapear).list();
+    }
+
+    @Override
     public Registro atualizar(Orcamento orcamento, long versaoEsperada) {
         // Only the state changes after creation; everything else is an immutable snapshot.
         String sql = "UPDATE orcamentos SET estado = :estado, versao = versao + 1 "
