@@ -20,3 +20,12 @@ output "ssm_parameter_names" {
     event_topic_arn   = aws_ssm_parameter.event_topic_arn.name
   }
 }
+
+output "ecr_repository_url" {
+  value = aws_ecr_repository.billing.repository_url
+}
+
+output "db_secret_name" {
+  description = "Nome do segredo com as credenciais do banco; vazio se o RDS nao foi criado."
+  value       = local.criar_rds ? aws_secretsmanager_secret.billing_db[0].name : ""
+}
