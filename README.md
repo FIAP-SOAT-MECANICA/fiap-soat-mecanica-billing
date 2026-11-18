@@ -21,8 +21,28 @@ Fundação isolada do microsserviço responsável por orçamento e cobrança. O 
 
 Com Java 21 e Docker ativos, rode `./mvnw.cmd verify` no Windows ou `./mvnw verify` em Linux/macOS. Os testes de domínio não exigem serviços externos; o teste da migração usa PostgreSQL em Testcontainers. O relatório de cobertura fica em `target/site/jacoco/index.html`. Para iniciar a aplicação, forneça `BILLING_DB_URL`, `BILLING_DB_USER` e `BILLING_DB_PASSWORD` para um PostgreSQL acessível e rode `./mvnw.cmd spring-boot:run`. Flyway aplica a migração ao iniciar. `GET /actuator/health` verifica a aplicação. A imagem pode ser construída após `verify` com `docker build -t mecanica-billing .`.
 
-## Integração pendente com a Saga
+## Integração com a Saga
 
-O [plano da Fase 4](https://gist.github.com/lenilsonf/c8fa28726f348a97c178e870665cef4f) define a Saga orquestrada no serviço OS: Execução publica `DiagnosticoConcluido` para o OS, que solicita `GerarOrcamento` ao Billing. O PDF de 11/11 propõe o Billing consumir `DiagnosticoConcluido` diretamente. A escolha do fluxo, o contrato final do comando/evento e a responsabilidade pelo disparo permanecem pendentes de decisão entre os serviços. O OS já fixou o contrato no repositório dele (`TiposDeMensagem` e `Payloads`): é ele quem envia `GerarOrcamento`, e o Billing o consome.
+O [plano da Fase 4](https://gist.github.com/lenilsonf/c8fa28726f348a97c178e870665cef4f) e o RFC-002 do OS definem a Saga orquestrada no serviço OS. Quem dispara o orçamento é o OS: ao receber `DiagnosticoConcluido` do Execução, ele envia `GerarOrcamento` à fila do Billing. O contrato está fixado no repositório do OS (`TiposDeMensagem` e `Payloads`) e o Billing o segue. Todas as mensagens usam o envelope comum `{messageId, type, version, sagaId, osId, correlationId, causationId, occurredAt, payload}`, e `payload.osId` é igual ao `osId` do envelope.
 
-O campo `revisao` na migração permite mais de um orçamento por OS. A atribuição da próxima revisão, o bloqueio de duplicatas, a persistência dos agregados, a outbox e o registro de `message_id` já estão na camada de persistência; a API de orçamento já os usa para aprovar e recusar; o consumidor de `GerarOrcamento` gera o orçamento. O `sagaId` do comando ainda não é guardado com o orçamento, então os eventos de aprovação e recusa saem com `sagaId` e `causationId` nulos, e o OS precisa localizar a Saga pelo `osId`. As transições de domínio rejeitam aprovar ou recusar um orçamento que não esteja `GERADO`; um consumidor futuro deverá deduplicar a mensagem antes de invocar essas transições.
+| Sentido | Mensagem | Payload | O que o Billing faz |
+| --- | --- | --- | --- |
+| OS → Billing (fila `mecanica-billing-comandos`) | `GerarOrcamento` | `{osId, clienteId, itens[{servicoId, nomeServico, precoMdo, pecas[{pecaId, qtd, valorUnit}]}]}` | cria o orçamento e responde `OrcamentoGerado` |
+| OS → Billing | `CancelarOrcamento` | `{osId, orcamentoId}` | cancela, sem erro se já não existir ou estiver encerrado |
+| OS → Billing | `SolicitarPagamento` | `{osId, orcamentoId}` | abre a cobrança no Mercado Pago |
+| OS → Billing | `CancelarCobranca` | `{osId, orcamentoId}` | retira a cobrança ainda pendente |
+| Billing → OS (tópico `mecanica-billing-eventos`) | `OrcamentoGerado` | `{osId, orcamentoId}` | — |
+| Billing → OS | `OrcamentoAprovado` | `{osId, orcamentoId}` | publicado quando o cliente aprova pela API |
+| Billing → OS | `OrcamentoRecusado` | `{osId, orcamentoId, motivo}` | recusa do cliente ou orçamento vencido (`motivo`) |
+| Billing → OS | `PagamentoConfirmado` | `{osId, orcamentoId, pagamentoId}` | publicado pelo webhook do Mercado Pago |
+| Billing → OS | `PagamentoRecusado` | `{osId, orcamentoId, pagamentoId}` | publicado pelo webhook do Mercado Pago |
+
+O OS assina o tópico do Billing com entrega bruta (`raw_message_delivery`) na fila de respostas dele e descobre a fila e o tópico do Billing pelo SSM, em `/mecanica/billing/command-queue-url` e `/mecanica/billing/event-topic-arn`. Por isso o `apply` do Billing precisa vir antes do módulo de mensageria do OS.
+
+Pontos ainda abertos:
+
+- O `sagaId` do comando é usado em `OrcamentoGerado`, mas não é guardado com o orçamento: os demais eventos saem com `sagaId` e `causationId` nulos, e o OS localiza a Saga pelo `osId`.
+- A rejeição de um pagamento encerra a cobrança (`RECUSADO`), embora o Checkout Pro deixe o cliente tentar de novo na mesma página. Um pagamento aprovado depois disso, ou depois de `CancelarCobranca`, só gera um log de erro e exige reembolso manual.
+- `CancelarCobranca` marca a cobrança como cancelada aqui, mas não fecha a página de pagamento no Mercado Pago.
+- A API só aceita tokens do Identity (RS256), que ainda não existe; até lá toda rota autenticada responde 401.
+- Nada foi exercitado contra a AWS real nem contra o sandbox do Mercado Pago.

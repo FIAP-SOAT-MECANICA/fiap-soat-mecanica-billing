@@ -8,7 +8,7 @@ resource "aws_sqs_queue" "comandos_dlq" {
   message_retention_seconds = 1209600
 }
 
-# Comandos do OS para o Billing: GerarOrcamento, CancelarOrcamento, SolicitarPagamento.
+# Comandos do OS para o Billing: GerarOrcamento, CancelarOrcamento, SolicitarPagamento e CancelarCobranca.
 resource "aws_sqs_queue" "comandos" {
   name                       = "${var.project}-billing-comandos"
   visibility_timeout_seconds = var.visibility_timeout_seconds
